@@ -5,5 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "charset-normalizer>=3.4.2",
     "libpff-python>=20231205",
+    "striprtf>=0.0.29",
 ]
