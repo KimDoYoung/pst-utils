@@ -39,7 +39,7 @@ def _make_handlers(log_file: Path,
     return [file_handler, console_handler]
 
 
-def get_logger(name: str = "fund_mail") -> logging.Logger:
+def get_logger(name: str = "pst-extract") -> logging.Logger:
     """
     콘솔과 회전 로그 파일에 동시에 기록하는 로거를 반환한다.
     동일한 이름으로 여러 번 호출해도 중복 핸들러 없이 같은 로거를 돌려준다.

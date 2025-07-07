@@ -4,7 +4,7 @@ import sqlite3
 from exceptions import DBCreateError, DBWriteError
 from logger import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 def create_db_tables(db_path):
     """
@@ -29,7 +29,9 @@ def create_db_tables(db_path):
             cc_recipients TEXT,  -- 참조자 목록
             email_time TEXT,
             kst_time TEXT,
-            content TEXT
+            content TEXT,
+            msg_kind TEXT,
+            folder_path TEXT
         )
     """)
     cur.execute("""
@@ -38,7 +40,8 @@ def create_db_tables(db_path):
             parent_id INTEGER,
             email_id TEXT,  -- fund_mail 테이블의 id
             save_folder TEXT,
-            file_name TEXT
+            org_file_name TEXT,
+            phy_file_name TEXT
         )
     """)        
     conn.commit()

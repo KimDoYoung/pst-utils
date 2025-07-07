@@ -3,8 +3,11 @@ import sys
 import os
 from datetime import datetime, timezone, timedelta
 import json
+from db_actions import create_db_tables
 from helper import  recipients_from_headers, byte_decode
 from helper import extract_attachments
+from logger import get_logger
+from dotenv import load_dotenv
 
 # MAPI 속성 상수들
 PR_MESSAGE_CLASS = 0x001A  # 26
@@ -387,13 +390,52 @@ def walk_and_extract_emails(folder: pypff.folder, folder_path: str = "", max_ema
     
     return emails
 
+def create_db_path(pst_path: str) -> str:
+    """
+    PST 파일 경로로부터 DB 파일 경로를 생성합니다.
+    형식: {DB_DIR}/{pst_filename}_{yyyymmdd_hh_mm}.db
+    """
+    import os
+    from pathlib import Path
+    from datetime import datetime
+    from dotenv import load_dotenv
+    
+    # .env 파일 로드
+    load_dotenv()
+    
+    # 환경변수에서 DB_DIR 읽기 (기본값: ./db)
+    db_dir_str = os.getenv("DB_DIR", "./db")
+    
+    # PST 파일명 추출 (확장자 제거)
+    pst_filename = Path(pst_path).stem
+    
+    # 현재 시간으로 타임스탬프 생성
+    timestamp = datetime.now().strftime("%Y%m%d_%H_%M")
+    
+    # DB 파일명 생성
+    db_filename = f"{pst_filename}_{timestamp}.db"
+    
+    # DB 디렉터리 생성
+    db_dir = Path(db_dir_str).expanduser().resolve()
+    db_dir.mkdir(parents=True, exist_ok=True)
+    
+    return str(db_dir / db_filename)
+
+logger = get_logger(__name__)
 # 메인 실행
 if __name__ == "__main__":
-    pst_path = "/mnt/c/tmp/2021.pst"
     
+    pst_path = "/mnt/c/tmp/2021.pst"
+
     if not os.path.exists(pst_path):
-        print(f"❌ PST file not found: {pst_path}")
+        logger.error(f"❌ PST file not found: {pst_path}")
         sys.exit(1)
+
+    logger.info("="*60)
+    logger.info(f"🔴 PST파일 추출  시작: {pst_path}")
+    logger.info("="*60)
+    db_path = create_db_path(pst_path)
+    create_db_tables(db_path)
     
     try:
         pf = pypff.file()
@@ -401,52 +443,20 @@ if __name__ == "__main__":
         
         root_folder = pf.get_root_folder()
         if not root_folder:
-            print("❌ Cannot access root folder")
+            logger.error("❌ root folder에 접근 할 수 없습니다")
             sys.exit(1)
         
-        # 첫 번째 메시지 디버깅
-        print("🔍 Debugging first message...")
-        for msg in root_folder.sub_messages:
-            msg_class = get_message_class(msg)
-            if msg_class.upper().startswith("IPM.NOTE"):
-                debug_message_properties(msg)
-                break
-        
-        print("\n" + "="*60)
-        print("🔍 Extracting email data...")
-        
         # 이메일 추출
-        emails = walk_and_extract_emails(root_folder, max_emails=100)
-        
-        print(f"\n✅ Extracted {len(emails)} emails")
-        
-        # 첫 번째 이메일 데이터 출력
-        if emails:
-            print("\n📧 First email data:")
-            first_email = emails[0]
-            for key, value in first_email.items():
-                if key == 'content':
-                    print(f"{key}: {str(value)[:100]}...")
-                else:
-                    print(f"{key}: {value}")
-        
-        # 통계 정보 출력
-        sent_count = sum(1 for email in emails if email['msg_kind'] == 'sent')
-        receiv_count = sum(1 for email in emails if email['msg_kind'] == 'receiv')
-        print(f"\n📊 Statistics:")
-        print(f"  Sent emails: {sent_count}")
-        print(f"  Received emails: {receiv_count}")
-        
-        # JSON으로 저장
-        output_file = "extracted_emails_enhanced.json"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(emails, f, ensure_ascii=False, indent=2)
-        print(f"\n💾 Data saved to: {output_file}")
+        # emails = walk_and_extract_emails(root_folder, max_emails=100)
         
         pf.close()
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.error(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        logger.info("="*60)
+        logger.info(f"🔴 PST파일 추출 종료")
+        logger.info("="*60)

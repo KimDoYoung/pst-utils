@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 extracted_emails.json
+logs/
+db/
