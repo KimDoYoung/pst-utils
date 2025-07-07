@@ -6,7 +6,8 @@ from typing import Sequence
 from charset_normalizer import from_bytes
 from pathlib import Path
 from uuid import uuid4
-
+from datetime import datetime
+import time
 # print(email.__file__)
 # MAPI 속성 상수
 PR_MESSAGE_CLASS = 0x001A  # 26 in decimal
@@ -454,10 +455,15 @@ def is_inline_attachment(att) -> bool:
         print(f"첨부파일 판별 중 오류: {e}")
         return False
 
-
+def make_physical_file_name(prefix: str = "", ext="") -> str:
+    now = datetime.now()
+    # 앞부분: YYYYMMDD_HHMMSS
+    # 뒷부분: microseconds(000000 ~ 999999)
+    micros = f"{now.microsecond:06d}"
+    return f"{prefix}_{micros}{ext}"
 
 def extract_attachments(msg: pypff.message,
-                        base_dir: Path) -> list[dict]:
+                        base_dir: Path, email_id) -> list[dict]:
     """
     첨부파일을 base_dir 하위에 저장하고 디버깅 정보 출력
     """
@@ -524,11 +530,19 @@ def extract_attachments(msg: pypff.message,
             fp.write(data)
         
         print(f"[DEBUG] 파일 저장 완료: {save_path}")
-        
+                    #          attach["email_id"],
+                    #  attach["save_folder"],
+                    #  attach["org_file_name"],
+                    #  attach["phy_file_name"])
+        save_folder = str(save_path.parent)
+        # email_id = str(getattr(msg, 'identifier'))
+        ext = Path(name).suffix  # name에서 확장자 추출 (. 포함)
+        physical_file_name = make_physical_file_name(email_id, ext)
         results.append({
-            "filename": name,
-            "size": size,
-            "save_path": str(save_path),
+            "email_id": email_id,
+            "org_file_name": name,
+            "phy_file_name": save_path.name,
+            "save_folder": save_folder,
         })
     
     return results

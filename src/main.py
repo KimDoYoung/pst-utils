@@ -3,7 +3,7 @@ import sys
 import os
 from datetime import datetime, timezone, timedelta
 import json
-from db_actions import create_db_tables
+from db_actions import create_db_tables, save_email_data_to_db
 from helper import  recipients_from_headers, byte_decode
 from helper import extract_attachments
 from logger import get_logger
@@ -282,7 +282,8 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     attach_dir = f"/home/kdy987/data/{ymd}"
     # if not os.path.exists(attach_dir):
     #     os.makedirs(attach_dir, exist_ok=True)
-    email_data['attachments'] = extract_attachments(msg, attach_dir)
+    email_id = email_data['email_id']
+    email_data['attachments'] = extract_attachments(msg, attach_dir, email_id=email_id)
     
     return email_data
 
@@ -338,9 +339,9 @@ def debug_message_properties(msg: pypff.message, max_entries: int = 20) -> None:
         value = get_property_from_record_sets(msg, prop_id)
         print(f"{prop_name} ({prop_id}): {value}")
 
-def walk_and_extract_emails(folder: pypff.folder, folder_path: str = "", max_emails: int = 5, depth: int = 0) -> list:
+def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str = "", depth: int = 0):
     """폴더를 순회하며 이메일 데이터를 추출"""
-    emails = []
+    # emails = []
     
     # 현재 폴더명 추가
     current_folder_name = getattr(folder, 'name', 'Unknown')
@@ -352,43 +353,35 @@ def walk_and_extract_emails(folder: pypff.folder, folder_path: str = "", max_ema
     try:
         if hasattr(folder, 'sub_messages'):
             for msg in folder.sub_messages:
-                if len(emails) >= max_emails:
-                    break
                 
                 try:
                     msg_class = get_message_class(msg)
                     if msg_class.upper().startswith("IPM.NOTE"):
                         email_data = extract_email_data(msg, current_path)
-                        emails.append(email_data)
-                        
+                        save_email_data_to_db([email_data], db_path)                    
                         # 진행상황 출력
-                        print(f"{'  ' * depth}📧 [{email_data['msg_kind']}] {email_data['subject'][:50]}...")
+                        logger.info(f"{'  ' * depth} [{email_data['msg_kind']}] {email_data['kst_time']} {email_data['subject'][:50]}...")
                         
                 except Exception as e:
-                    print(f"Warning: Error processing message: {e}")
+                    logger.warning(f"Warning: Error processing message: {e}")
                     continue
         
         # 하위 폴더 처리
-        if hasattr(folder, 'sub_folders') and len(emails) < max_emails:
+        if hasattr(folder, 'sub_folders'):
             for sub_folder in folder.sub_folders:
-                if len(emails) >= max_emails:
-                    break
-                
+               
                 try:
                     sub_folder_name = getattr(sub_folder, 'name', 'Unknown')
-                    print(f"{'  ' * depth}📁 {sub_folder_name}")
+                    logger.info(f"{'  ' * depth}📁 {sub_folder_name}")
                     
-                    sub_emails = walk_and_extract_emails(sub_folder, current_path, max_emails - len(emails), depth + 1)
-                    emails.extend(sub_emails)
+                    walk_and_extract_emails(db_path=db_path, folder=sub_folder, folder_path = current_path, depth =  depth + 1)
                     
                 except Exception as e:
-                    print(f"Warning: Error processing subfolder: {e}")
+                    logger.warning(f"Warning: Error processing subfolder: {e}")
                     continue
     
     except Exception as e:
-        print(f"Error walking folder: {e}")
-    
-    return emails
+        logger.error(f"Error walking folder: {e}")
 
 def create_db_path(pst_path: str) -> str:
     """
@@ -447,7 +440,7 @@ if __name__ == "__main__":
             sys.exit(1)
         
         # 이메일 추출
-        # emails = walk_and_extract_emails(root_folder, max_emails=100)
+        walk_and_extract_emails(db_path=db_path, folder = root_folder)
         
         pf.close()
         

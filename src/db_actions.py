@@ -69,8 +69,8 @@ def save_email_data_to_db(email_data_list, db_path):
                     INSERT INTO fund_mail
                           (email_id, subject, sender_address, sender_name, from_address, from_name,
                            to_recipients, cc_recipients,
-                           email_time, kst_time, content)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           email_time, kst_time, content, msg_kind, folder_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     email["email_id"],
                     email["subject"],
@@ -83,21 +83,27 @@ def save_email_data_to_db(email_data_list, db_path):
                     email["email_time"],
                     email["kst_time"],
                     email["content"],
+                    email["msg_kind"],
+                    email["folder_path"]
                 ))
                 parent_id = cur.lastrowid
 
                 # --- 2) 첨부파일 bulk INSERT ------------------------
+            # save_folder TEXT,
+            # org_file_name TEXT,
+            # phy_file_name TEXT                
                 attach_rows = [
                     (parent_id,
                      attach["email_id"],
                      attach["save_folder"],
-                     attach["file_name"])
+                     attach["org_file_name"],
+                     attach["phy_file_name"])
                     for attach in email.get("attach_files", [])
                 ]
                 cur.executemany("""
                     INSERT INTO fund_mail_attach
-                          (parent_id, email_id, save_folder, file_name)
-                    VALUES (?, ?, ?, ?)
+                          (parent_id, email_id, save_folder, org_file_name, phy_file_name)
+                    VALUES (?, ?, ?, ?, ?)
                 """, attach_rows)
                 attach_count = attach_count + len(attach_rows)
             # with-블록을 무사히 통과해야만 COMMIT 발생
