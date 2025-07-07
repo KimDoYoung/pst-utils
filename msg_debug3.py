@@ -3,7 +3,8 @@ import sys
 import os
 from datetime import datetime, timezone, timedelta
 import json
-from helper import recipients_from_headers, byte_decode
+from helper import  recipients_from_headers, byte_decode
+from helper import extract_attachments
 
 # MAPI 속성 상수들
 PR_MESSAGE_CLASS = 0x001A  # 26
@@ -13,6 +14,10 @@ PR_SENT_REPRESENTING_EMAIL_ADDRESS = 0x0065  # 101
 PR_SENT_REPRESENTING_NAME = 0x0042  # 66
 PR_DISPLAY_TO = 0x0E04  # 3588
 PR_DISPLAY_CC = 0x0E03  # 3587
+PR_RECEIVED_BY_EMAIL_ADDRESS = 0x0076  # 118
+PR_RECEIVED_BY_NAME = 0x0040  # 64
+PR_MESSAGE_FLAGS   = 0x0E07  # 3591
+MSGFLAG_FROMME     = 0x00000040
 
 def get_message_class(msg: pypff.message) -> str:
     """message_class 추출"""
@@ -75,48 +80,70 @@ def get_property_from_record_sets(msg: pypff.message, property_id: int) -> str:
         pass
     return ""
 
+def determine_message_kind(msg: pypff.message, folder_path: str) -> str:
+    # 1) 폴더명으로 빠르게 판별
+    if folder_path.lower() in ("sent items", "sent", "보낸 편지함", "outbox"):
+        return "sent"
+
+    # 2) MAPI 플래그 확인 (보다 확실)
+    flags = get_property_from_record_sets(msg, PR_MESSAGE_FLAGS)
+    try:
+        flags_int = int(flags) if flags else 0
+        if flags_int & MSGFLAG_FROMME:
+            return "sent"
+    except ValueError:
+        pass
+    return "receive"
+
+def get_receiver_info(msg: pypff.message) -> tuple:
+    """수신자 정보 추출 (이메일 주소, 이름)"""
+    receiver_addresses = []
+    receiver_names = []
+    
+    try:
+        if hasattr(msg, 'recipients'):
+            for recipient in msg.recipients:
+                try:
+                    # 수신자 타입 확인 (1=TO, 2=CC, 3=BCC)
+                    recipient_type = getattr(recipient, 'type', 1)
+                    
+                    # TO 수신자만 처리
+                    if recipient_type == 1:
+                        email = getattr(recipient, 'email_address', '') or ''
+                        name = getattr(recipient, 'name', '') or ''
+                        
+                        if email:
+                            receiver_addresses.append(email)
+                        if name:
+                            receiver_names.append(name)
+                            
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    # record_sets에서도 시도
+    if not receiver_addresses:
+        received_by_email = get_property_from_record_sets(msg, PR_RECEIVED_BY_EMAIL_ADDRESS)
+        received_by_name = get_property_from_record_sets(msg, PR_RECEIVED_BY_NAME)
+        
+        if received_by_email:
+            receiver_addresses.append(received_by_email)
+        if received_by_name:
+            receiver_names.append(received_by_name)
+    
+    return "; ".join(receiver_addresses), "; ".join(receiver_names)
+
 def get_recipients_info(msg: pypff.message) -> tuple:
     """수신자와 참조자 정보를 추출"""
     to_recipients = []
     cc_recipients = []
     
-    # print(sorted(a for a in dir(msg) if not a.startswith("_")))
+    # transport_headers에서 추출
     tr_header = getattr(msg, 'transport_headers', b'')
-    to1,cc1 = recipients_from_headers(tr_header)
-    # print(f"transport_headers: {to1=}, {cc1=}")
-    return to1, cc1
-    # try:
-    #     if hasattr(msg, 'recipients'):
-    #         for recipient in msg.recipients:
-    #             try:
-    #                 # 수신자 정보 추출
-    #                 name = getattr(recipient, 'name', '') or ''
-    #                 email = getattr(recipient, 'email_address', '') or ''
-    #                 recipient_type = getattr(recipient, 'type', 1)  # 1=TO, 2=CC, 3=BCC
-                    
-    #                 # 이름과 이메일 조합
-    #                 if name and email:
-    #                     recipient_str = f"{name} <{email}>"
-    #                 elif email:
-    #                     recipient_str = email
-    #                 elif name:
-    #                     recipient_str = name
-    #                 else:
-    #                     continue
-                    
-    #                 # 타입에 따라 분류
-    #                 if recipient_type == 1:  # TO
-    #                     to_recipients.append(recipient_str)
-    #                 elif recipient_type == 2:  # CC
-    #                     cc_recipients.append(recipient_str)
-                        
-    #             except Exception as e:
-    #                 print(f"Warning: Error processing recipient: {e}")
-    #                 continue
-    # except Exception as e:
-    #     print(f"Warning: Error accessing recipients: {e}")
+    to1, cc1 = recipients_from_headers(tr_header)
     
-    # return "; ".join(to_recipients), "; ".join(cc_recipients)
+    return to1, cc1
 
 def convert_to_kst(dt: datetime) -> str:
     """UTC datetime을 KST로 변환"""
@@ -133,7 +160,6 @@ def convert_to_kst(dt: datetime) -> str:
         return kst_dt.strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         return str(dt)
-
 
 def extract_email_content(msg) -> str:
     """이메일 본문 추출 — plain text > html > rtf 순서, 안전한 디코딩 포함"""
@@ -167,55 +193,32 @@ def extract_email_content(msg) -> str:
 
     return ""  # 아무것도 없을 때
 
-# def extract_email_content(msg: pypff.message) -> str:
-#     """이메일 본문 추출 (우선순위: plain_text > html > rtf)"""
-#     content = ""
+def build_folder_path(folder: pypff.folder, path_list: list = None) -> str:
+    """폴더의 전체 경로 구성"""
+    if path_list is None:
+        path_list = []
     
-#     # 1. Plain text 시도
-#     try:
-#         if hasattr(msg, 'plain_text_body') and msg.plain_text_body:
-#             if isinstance(msg.plain_text_body, bytes):
-#                 content = msg.plain_text_body.decode('utf-8', 'replace')
-#             else:
-#                 content = str(msg.plain_text_body)
-#             if content.strip():
-#                 return content
-#     except Exception:
-#         pass
+    try:
+        folder_name = getattr(folder, 'name', 'Unknown')
+        if folder_name and folder_name != 'Root':
+            path_list.insert(0, folder_name)
+        
+        # 상위 폴더가 있으면 재귀적으로 처리
+        if hasattr(folder, 'parent') and folder.parent:
+            return build_folder_path(folder.parent, path_list)
+    except Exception:
+        pass
     
-#     # 2. HTML 시도
-#     try:
-#         if hasattr(msg, 'html_body') and msg.html_body:
-#             if isinstance(msg.html_body, bytes):
-#                 content = msg.html_body.decode('utf-8', 'replace')
-#             else:
-#                 content = str(msg.html_body)
-#             if content.strip():
-#                 return content
-#     except Exception:
-#         pass
-    
-#     # 3. RTF 시도
-#     try:
-#         if hasattr(msg, 'rtf_body') and msg.rtf_body:
-#             if isinstance(msg.rtf_body, bytes):
-#                 content = msg.rtf_body.decode('utf-8', 'replace')
-#             else:
-#                 content = str(msg.rtf_body)
-#             if content.strip():
-#                 return content
-#     except Exception:
-#         pass
-    
-#     return ""
+    return "/".join(path_list) if path_list else "Root"
 
-def extract_email_data(msg: pypff.message) -> dict:
+
+def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     """
     pypff.message에서 fund_mail 테이블에 맞는 데이터를 추출합니다.
     """
     # 기본 정보 추출
     email_data = {
-        'email_id': str(getattr(msg, 'identifier', '')),  # PST에서는 identifier를 사용
+        'email_id': str(getattr(msg, 'identifier', '')),
         'subject': '',
         'sender_address': '',
         'sender_name': '',
@@ -225,7 +228,11 @@ def extract_email_data(msg: pypff.message) -> dict:
         'cc_recipients': '',
         'email_time': '',
         'kst_time': '',
-        'content': ''
+        'content': '',
+        # 새로 추가된 필드들
+        'msg_kind': '',
+        'folder_path': folder_path,
+        'attachments': [],
     }
     
     # 제목
@@ -237,11 +244,11 @@ def extract_email_data(msg: pypff.message) -> dict:
     # 발신자 정보
     try:
         email_data['sender_name'] = getattr(msg, 'sender_name', '') or ''
-        email_data['from_name'] = email_data['sender_name']  # 동일하게 설정
+        email_data['from_name'] = email_data['sender_name']
     except Exception:
         pass
     
-    # 발신자 이메일 주소 (record_sets에서 추출)
+    # 발신자 이메일 주소
     sender_email = get_property_from_record_sets(msg, PR_SENDER_EMAIL_ADDRESS)
     if sender_email:
         email_data['sender_address'] = sender_email
@@ -263,6 +270,16 @@ def extract_email_data(msg: pypff.message) -> dict:
     
     # 이메일 본문
     email_data['content'] = extract_email_content(msg)
+    
+    # 메시지 종류 판단
+    email_data['msg_kind'] = determine_message_kind(msg, folder_path)
+    
+    # 첨부파일 추출
+    ymd = email_data['kst_time'][:10] if email_data['kst_time'] else ''
+    attach_dir = f"/home/kdy987/data/{ymd}"
+    # if not os.path.exists(attach_dir):
+    #     os.makedirs(attach_dir, exist_ok=True)
+    email_data['attachments'] = extract_attachments(msg, attach_dir)
     
     return email_data
 
@@ -309,16 +326,25 @@ def debug_message_properties(msg: pypff.message, max_entries: int = 20) -> None:
         (PR_SENT_REPRESENTING_EMAIL_ADDRESS, "FROM_EMAIL"),
         (PR_SENT_REPRESENTING_NAME, "FROM_NAME"),
         (PR_DISPLAY_TO, "TO_RECIPIENTS"),
-        (PR_DISPLAY_CC, "CC_RECIPIENTS")
+        (PR_DISPLAY_CC, "CC_RECIPIENTS"),
+        (PR_RECEIVED_BY_EMAIL_ADDRESS, "RECEIVED_BY_EMAIL"),
+        (PR_RECEIVED_BY_NAME, "RECEIVED_BY_NAME")
     ]
     
     for prop_id, prop_name in important_props:
         value = get_property_from_record_sets(msg, prop_id)
         print(f"{prop_name} ({prop_id}): {value}")
 
-def walk_and_extract_emails(folder: pypff.folder, max_emails: int = 5, depth: int = 0) -> list:
+def walk_and_extract_emails(folder: pypff.folder, folder_path: str = "", max_emails: int = 5, depth: int = 0) -> list:
     """폴더를 순회하며 이메일 데이터를 추출"""
     emails = []
+    
+    # 현재 폴더명 추가
+    current_folder_name = getattr(folder, 'name', 'Unknown')
+    if folder_path:
+        current_path = f"{folder_path}/{current_folder_name}"
+    else:
+        current_path = current_folder_name if current_folder_name != 'Root' else ""
     
     try:
         if hasattr(folder, 'sub_messages'):
@@ -329,11 +355,11 @@ def walk_and_extract_emails(folder: pypff.folder, max_emails: int = 5, depth: in
                 try:
                     msg_class = get_message_class(msg)
                     if msg_class.upper().startswith("IPM.NOTE"):
-                        email_data = extract_email_data(msg)
+                        email_data = extract_email_data(msg, current_path)
                         emails.append(email_data)
                         
                         # 진행상황 출력
-                        print(f"{'  ' * depth}📧 [{email_data['email_id']}] {email_data['subject'][:50]}...")
+                        print(f"{'  ' * depth}📧 [{email_data['msg_kind']}] {email_data['subject'][:50]}...")
                         
                 except Exception as e:
                     print(f"Warning: Error processing message: {e}")
@@ -346,10 +372,10 @@ def walk_and_extract_emails(folder: pypff.folder, max_emails: int = 5, depth: in
                     break
                 
                 try:
-                    folder_name = getattr(sub_folder, 'name', 'Unknown')
-                    print(f"{'  ' * depth}📁 {folder_name}")
+                    sub_folder_name = getattr(sub_folder, 'name', 'Unknown')
+                    print(f"{'  ' * depth}📁 {sub_folder_name}")
                     
-                    sub_emails = walk_and_extract_emails(sub_folder, max_emails - len(emails), depth + 1)
+                    sub_emails = walk_and_extract_emails(sub_folder, current_path, max_emails - len(emails), depth + 1)
                     emails.extend(sub_emails)
                     
                 except Exception as e:
@@ -404,8 +430,15 @@ if __name__ == "__main__":
                 else:
                     print(f"{key}: {value}")
         
-        # JSON으로 저장 (선택사항)
-        output_file = "extracted_emails.json"
+        # 통계 정보 출력
+        sent_count = sum(1 for email in emails if email['msg_kind'] == 'sent')
+        receiv_count = sum(1 for email in emails if email['msg_kind'] == 'receiv')
+        print(f"\n📊 Statistics:")
+        print(f"  Sent emails: {sent_count}")
+        print(f"  Received emails: {receiv_count}")
+        
+        # JSON으로 저장
+        output_file = "extracted_emails_enhanced.json"
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(emails, f, ensure_ascii=False, indent=2)
         print(f"\n💾 Data saved to: {output_file}")
