@@ -11,6 +11,18 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python"
+        },
+        {
+            "name": "D1",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.main",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "args": [
+                "--pst-path",
+                "/mnt/c/tmp/2021.pst"  // Hardcoded path for testing
+            ]
         }
     ]
 }

@@ -1,13 +1,15 @@
 import pypff
 import sys
 import os
+import argparse
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
-import json
-from db_actions import create_db_tables, save_email_data_to_db
-from helper import  recipients_from_headers, byte_decode
-from helper import extract_attachments
+from db_actions import create_db_tables, save_email_data_to_db, create_db_path
+from helper import  recipients_from_headers, byte_decode,extract_attachments,convert_to_kst
 from logger import get_logger
 from config import settings
+
+
 logger = get_logger(__name__)
 
 # MAPI 속성 상수들
@@ -149,21 +151,7 @@ def get_recipients_info(msg: pypff.message) -> tuple:
     
     return to1, cc1
 
-def convert_to_kst(dt: datetime) -> str:
-    """UTC datetime을 KST로 변환"""
-    if dt is None:
-        return ""
-    
-    try:
-        # pypff에서 반환하는 datetime이 UTC라고 가정
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        
-        # KST로 변환 (UTC+9)
-        kst_dt = dt.astimezone(timezone(timedelta(hours=9)))
-        return kst_dt.strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        return str(dt)
+
 
 def extract_email_content(msg) -> str:
     """이메일 본문 추출 — plain text > html > rtf 순서, 안전한 디코딩 포함"""
@@ -280,7 +268,8 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     
     # 첨부파일 추출
     ymd = email_data['kst_time'][:10] if email_data['kst_time'] else ''
-    attach_dir = f"/home/kdy987/data/{ymd}"
+    # attach_dir = f"/home/kdy987/data/{ymd}"
+    attach_dir = settings.attach_dir / ymd
     # if not os.path.exists(attach_dir):
     #     os.makedirs(attach_dir, exist_ok=True)
     email_id = email_data['email_id']
@@ -288,57 +277,57 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     
     return email_data
 
-def debug_message_properties(msg: pypff.message, max_entries: int = 20) -> None:
-    """메시지의 모든 속성을 디버깅용으로 출력"""
-    print(f"\n=== Message Properties Debug ===")
-    print(f"Identifier: {getattr(msg, 'identifier', 'N/A')}")
-    print(f"Subject: {getattr(msg, 'subject', 'N/A')}")
+# def debug_message_properties(msg: pypff.message, max_entries: int = 20) -> None:
+#     """메시지의 모든 속성을 디버깅용으로 출력"""
+#     print(f"\n=== Message Properties Debug ===")
+#     print(f"Identifier: {getattr(msg, 'identifier', 'N/A')}")
+#     print(f"Subject: {getattr(msg, 'subject', 'N/A')}")
     
-    # 기본 속성들
-    attrs = [
-        'sender_name', 'creation_time', 'delivery_time', 'client_submit_time',
-        'conversation_topic', 'transport_headers', 'number_of_entries'
-    ]
+#     # 기본 속성들
+#     attrs = [
+#         'sender_name', 'creation_time', 'delivery_time', 'client_submit_time',
+#         'conversation_topic', 'transport_headers', 'number_of_entries'
+#     ]
     
-    for attr in attrs:
-        try:
-            value = getattr(msg, attr, None)
-            print(f"{attr}: {value}")
-        except Exception as e:
-            print(f"{attr}: ERROR - {e}")
+#     for attr in attrs:
+#         try:
+#             value = getattr(msg, attr, None)
+#             print(f"{attr}: {value}")
+#         except Exception as e:
+#             print(f"{attr}: ERROR - {e}")
     
-    # Recipients 정보
-    print(f"\n--- Recipients ---")
-    try:
-        if hasattr(msg, 'recipients'):
-            for i, recipient in enumerate(msg.recipients):
-                print(f"  Recipient {i}:")
-                for r_attr in ['name', 'email_address', 'type']:
-                    try:
-                        value = getattr(recipient, r_attr, 'N/A')
-                        print(f"    {r_attr}: {value}")
-                    except Exception as e:
-                        print(f"    {r_attr}: ERROR - {e}")
-    except Exception as e:
-        print(f"Recipients: ERROR - {e}")
+#     # Recipients 정보
+#     print(f"\n--- Recipients ---")
+#     try:
+#         if hasattr(msg, 'recipients'):
+#             for i, recipient in enumerate(msg.recipients):
+#                 print(f"  Recipient {i}:")
+#                 for r_attr in ['name', 'email_address', 'type']:
+#                     try:
+#                         value = getattr(recipient, r_attr, 'N/A')
+#                         print(f"    {r_attr}: {value}")
+#                     except Exception as e:
+#                         print(f"    {r_attr}: ERROR - {e}")
+#     except Exception as e:
+#         print(f"Recipients: ERROR - {e}")
     
-    # Record sets에서 중요한 속성들 찾기
-    print(f"\n--- Important Properties from Record Sets ---")
-    important_props = [
-        (PR_MESSAGE_CLASS, "MESSAGE_CLASS"),
-        (PR_SENDER_EMAIL_ADDRESS, "SENDER_EMAIL"),
-        (PR_SENDER_NAME, "SENDER_NAME"),
-        (PR_SENT_REPRESENTING_EMAIL_ADDRESS, "FROM_EMAIL"),
-        (PR_SENT_REPRESENTING_NAME, "FROM_NAME"),
-        (PR_DISPLAY_TO, "TO_RECIPIENTS"),
-        (PR_DISPLAY_CC, "CC_RECIPIENTS"),
-        (PR_RECEIVED_BY_EMAIL_ADDRESS, "RECEIVED_BY_EMAIL"),
-        (PR_RECEIVED_BY_NAME, "RECEIVED_BY_NAME")
-    ]
+#     # Record sets에서 중요한 속성들 찾기
+#     print(f"\n--- Important Properties from Record Sets ---")
+#     important_props = [
+#         (PR_MESSAGE_CLASS, "MESSAGE_CLASS"),
+#         (PR_SENDER_EMAIL_ADDRESS, "SENDER_EMAIL"),
+#         (PR_SENDER_NAME, "SENDER_NAME"),
+#         (PR_SENT_REPRESENTING_EMAIL_ADDRESS, "FROM_EMAIL"),
+#         (PR_SENT_REPRESENTING_NAME, "FROM_NAME"),
+#         (PR_DISPLAY_TO, "TO_RECIPIENTS"),
+#         (PR_DISPLAY_CC, "CC_RECIPIENTS"),
+#         (PR_RECEIVED_BY_EMAIL_ADDRESS, "RECEIVED_BY_EMAIL"),
+#         (PR_RECEIVED_BY_NAME, "RECEIVED_BY_NAME")
+#     ]
     
-    for prop_id, prop_name in important_props:
-        value = get_property_from_record_sets(msg, prop_id)
-        print(f"{prop_name} ({prop_id}): {value}")
+#     for prop_id, prop_name in important_props:
+#         value = get_property_from_record_sets(msg, prop_id)
+#         print(f"{prop_name} ({prop_id}): {value}")
 
 def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str = "", depth: int = 0):
     """폴더를 순회하며 이메일 데이터를 추출"""
@@ -384,12 +373,24 @@ def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str 
     except Exception as e:
         logger.error(f"Error walking folder: {e}")
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="PST 파일을 읽어 메일/첨부를 추출합니다."
+    )
 
+    # 위치(필수) 인자 ────────────────────────────────
+    parser.add_argument(
+        "pst-path",
+        type=Path,
+        help="분석할 PST 파일 경로"
+    )
+    return parser.parse_args()
 
+def main() -> None:
+    args = parse_args()
+    if args.verbose:
+        print(f"[+] PST 경로  : {args.pst_path}")   
 
-# 메인 실행
-if __name__ == "__main__":
-    
     pst_path = "/mnt/c/tmp/2021.pst"
 
     if not os.path.exists(pst_path):
@@ -425,3 +426,8 @@ if __name__ == "__main__":
         logger.info("="*60)
         logger.info(f"🔴 PST파일 추출 종료")
         logger.info("="*60)
+
+
+# 메인 실행
+if __name__ == "__main__":
+    main()

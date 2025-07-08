@@ -6,9 +6,11 @@ from typing import Sequence
 from charset_normalizer import from_bytes
 from pathlib import Path
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
-# print(email.__file__)
+
+from logger import get_logger
+# logger.debug(email.__file__)
 # MAPI 속성 상수
 PR_MESSAGE_CLASS = 0x001A  # 26 in decimal
 PR_ATTACH_LONG_FILENAME = 0x3707
@@ -25,6 +27,24 @@ PR_ATTACH_CONTENT_ID   = 0x3712  # PT_TSTRING/PT_BINARY
 # bits inside PR_ATTACH_FLAGS
 ATT_RENDERED_IN_BODY   = 0x00000004
 ATT_MHTML_REF          = 0x00002000
+
+logger = get_logger(__name__)
+
+def convert_to_kst(dt: datetime) -> str:
+    """UTC datetime을 KST로 변환"""
+    if dt is None:
+        return ""
+    
+    try:
+        # pypff에서 반환하는 datetime이 UTC라고 가정
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        
+        # KST로 변환 (UTC+9)
+        kst_dt = dt.astimezone(timezone(timedelta(hours=9)))
+        return kst_dt.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return str(dt)
 
 def get_message_class(msg: pypff.message) -> str:
     """
@@ -77,7 +97,7 @@ def get_message_class(msg: pypff.message) -> str:
                                 except Exception:
                                     pass
     except Exception as e:
-        print(f"Warning: Error in record_sets access: {e}")
+        logger.debug(f"Warning: Error in record_sets access: {e}")
     
     return ""
 
@@ -138,7 +158,7 @@ def recipients_from_headers(raw_headers: bytes | str) -> tuple[str, str]:
         to_pairs = email.utils.getaddresses(hdr.get_all("To",  []))
         cc_pairs = email.utils.getaddresses(hdr.get_all("Cc",  []))
     except Exception as e:
-        print("header-parse error:", e)
+        logger.debug("header-parse error:", e)
         to_pairs, cc_pairs = [], []
 
     def fmt(pairs):
@@ -161,9 +181,9 @@ def list_pypff_attrs(obj):
     ):
         try:
             val = getattr(obj, name)
-            print(f"{name:<15} ➜ {val!r}")
+            logger.debug(f"{name:<15} ➜ {val!r}")
         except AttributeError:
-            print(f"{name:<15} ✗  (없는 속성)")
+            logger.debug(f"{name:<15} ✗  (없는 속성)")
 
 INVALID = re.compile(r'[<>:"/\\|?*]')        # 윈도우·리눅스 공통 금지문자
 
@@ -180,7 +200,7 @@ def sanitize_filename(name: str) -> str:
 #         try:
 #             at = msg.get_attachment(i)
 #         except Exception as e:
-#             print(f"[{i}] attachment 객체 접근 실패 ➜ {e}")
+#             logger.debug(f"[{i}] attachment 객체 접근 실패 ➜ {e}")
 #             continue
 
 #         # ── 1) 사이즈 필수 ─────────────────────────
@@ -188,7 +208,7 @@ def sanitize_filename(name: str) -> str:
 #             size = at.get_size()           # or at.size
 #             data = at.read_buffer(size)    # ★ 여기!
 #         except Exception as e:
-#             print(f"[{i}] read_buffer 실패 ➜ {e}")
+#             logger.debug(f"[{i}] read_buffer 실패 ➜ {e}")
 #             continue
 
 #         # ── 2) 파일명: 최신 pypff에선 이름 프로퍼티가 없다 ──
@@ -281,32 +301,32 @@ def find_attach_name(att: pypff.attachment) -> str | None:
     )
     
     # 디버깅을 위한 로그 추가
-    print(f"[DEBUG] 첨부파일 record_sets 수: {getattr(att, 'number_of_record_sets', 0)}")
+    logger.debug(f"[DEBUG] 첨부파일 record_sets 수: {getattr(att, 'number_of_record_sets', 0)}")
     
     for rs_idx in range(getattr(att, "number_of_record_sets", 0)):
         rs = att.get_record_set(rs_idx)
-        print(f"[DEBUG] Record Set {rs_idx}: entries={rs.number_of_entries}")
+        logger.debug(f"[DEBUG] Record Set {rs_idx}: entries={rs.number_of_entries}")
         
         for ent_idx in range(rs.number_of_entries):
             ent = rs.get_entry(ent_idx)
             entry_type = ent.entry_type
             
             # 모든 엔트리 타입 로그 출력
-            print(f"[DEBUG] Entry {ent_idx}: type=0x{entry_type:04X}")
+            logger.debug(f"[DEBUG] Entry {ent_idx}: type=0x{entry_type:04X}")
             
             if entry_type in wanted:
                 try:
                     raw = ent.get_data()
-                    print(f"[DEBUG] Found entry type 0x{entry_type:04X}, raw data: {raw[:50]}...")
+                    logger.debug(f"[DEBUG] Found entry type 0x{entry_type:04X}, raw data: {raw[:50]}...")
                     
                     # 다양한 디코딩 방법 시도
                     decoded = decode_mapi_string_enhanced(raw, entry_type)
                     if decoded:
-                        print(f"[DEBUG] Successfully decoded: '{decoded}'")
+                        logger.debug(f"[DEBUG] Successfully decoded: '{decoded}'")
                         return decoded
                         
                 except Exception as e:
-                    print(f"[DEBUG] Entry 0x{entry_type:04X} decode failed: {e}")
+                    logger.debug(f"[DEBUG] Entry 0x{entry_type:04X} decode failed: {e}")
                     
     return None
 
@@ -318,8 +338,8 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
     if not raw_data:
         return None
     
-    print(f"[DEBUG] Raw data length: {len(raw_data)}")
-    print(f"[DEBUG] Raw data hex: {raw_data.hex()}")
+    logger.debug(f"[DEBUG] Raw data length: {len(raw_data)}")
+    logger.debug(f"[DEBUG] Raw data hex: {raw_data.hex()}")
     
     # 방법 1: 기존 decode_mapi_string 사용
     try:
@@ -327,7 +347,7 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
         if result and not result.startswith('___'):
             return result
     except Exception as e:
-        print(f"[DEBUG] decode_mapi_string failed: {e}")
+        logger.debug(f"[DEBUG] decode_mapi_string failed: {e}")
     
     # 방법 2: UTF-16LE 디코딩 (Windows 기본)
     try:
@@ -338,7 +358,7 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
         if result and not result.startswith('___'):
             return result
     except Exception as e:
-        print(f"[DEBUG] UTF-16LE decode failed: {e}")
+        logger.debug(f"[DEBUG] UTF-16LE decode failed: {e}")
     
     # 방법 3: UTF-8 디코딩
     try:
@@ -349,7 +369,7 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
         if result and not result.startswith('___'):
             return result
     except Exception as e:
-        print(f"[DEBUG] UTF-8 decode failed: {e}")
+        logger.debug(f"[DEBUG] UTF-8 decode failed: {e}")
     
     # 방법 4: CP949 (한국어 환경)
     try:
@@ -357,7 +377,7 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
         if result and not result.startswith('___'):
             return result
     except Exception as e:
-        print(f"[DEBUG] CP949 decode failed: {e}")
+        logger.debug(f"[DEBUG] CP949 decode failed: {e}")
     
     # 방법 5: Latin-1 (바이트 그대로)
     try:
@@ -365,7 +385,7 @@ def decode_mapi_string_enhanced(raw_data: bytes, entry_type: int) -> str | None:
         if result and not result.startswith('___'):
             return result
     except Exception as e:
-        print(f"[DEBUG] Latin-1 decode failed: {e}")
+        logger.debug(f"[DEBUG] Latin-1 decode failed: {e}")
     
     return None
 
@@ -452,7 +472,7 @@ def is_inline_attachment(att) -> bool:
         return False
         
     except Exception as e:
-        print(f"첨부파일 판별 중 오류: {e}")
+        logger.debug(f"첨부파일 판별 중 오류: {e}")
         return False
 
 def make_physical_file_name(prefix: str = "", ext="") -> str:
@@ -469,50 +489,50 @@ def extract_attachments(msg: pypff.message,
     """
     results = []
     
-    print(f"[DEBUG] 전체 첨부파일 수: {msg.number_of_attachments}")
+    logger.debug(f"[DEBUG] 전체 첨부파일 수: {msg.number_of_attachments}")
     
     for i in range(msg.number_of_attachments):
-        print(f"\n[DEBUG] === 첨부파일 {i} 처리 시작 ===")
+        logger.debug(f"\n[DEBUG] === 첨부파일 {i} 처리 시작 ===")
         
         att = msg.get_attachment(i)
         # if is_inline_attachment(att):
-        #     print(f"[DEBUG] 첨부파일 {i}은 본문에 삽입된 가짜 첨부입니다. 건너뜁니다.")
+        #     logger.debug(f"[DEBUG] 첨부파일 {i}은 본문에 삽입된 가짜 첨부입니다. 건너뜁니다.")
         #     continue
         
         # ── (1) 원본 파일명 찾기 ───────────────────────────────
         raw_name = find_attach_name(att)
-        print(f"[DEBUG] 추출된 파일명: '{raw_name}'")
+        logger.debug(f"[DEBUG] 추출된 파일명: '{raw_name}'")
         
         # 파일명이 제대로 추출되지 않은 경우 대체 방법 시도
         if not raw_name or raw_name.startswith('___'):
-            print(f"[DEBUG] 파일명 추출 실패, 대체 방법 시도")
+            logger.debug(f"[DEBUG] 파일명 추출 실패, 대체 방법 시도")
             # pypff의 다른 속성들 확인
             try:
                 if hasattr(att, 'get_name'):
                     alt_name = att.get_name()
-                    print(f"[DEBUG] att.get_name(): '{alt_name}'")
+                    logger.debug(f"[DEBUG] att.get_name(): '{alt_name}'")
                     if alt_name and not alt_name.startswith('___'):
                         raw_name = alt_name
             except:
                 pass
         
         name = safe_name(raw_name) if raw_name else f'attach_{i}'
-        print(f"[DEBUG] 최종 파일명: '{name}'")
+        logger.debug(f"[DEBUG] 최종 파일명: '{name}'")
         # image001.png, image002.jpg 등 자동 생성 인라인 이미지 패턴 여부 체크
         inline_img_pattern = re.compile(r"^image\d{3}\.(png|jpg|jpeg|gif|bmp|tiff|wmf|emf)$", re.I)
         is_auto_inline = bool(inline_img_pattern.match(name))
-        print(f"[DEBUG] 자동 생성 인라인 이미지 패턴 여부: {is_auto_inline}")
+        logger.debug(f"[DEBUG] 자동 생성 인라인 이미지 패턴 여부: {is_auto_inline}")
         if is_auto_inline:
-            print(f"[DEBUG] 자동 생성 인라인 이미지로 판단되어 저장하지 않습니다.")
+            logger.debug(f"[DEBUG] 자동 생성 인라인 이미지로 판단되어 저장하지 않습니다.")
             continue
         # ── (2) 실제 데이터 읽기 ───────────────────────────────
         try:
             size = att.get_size()
-            print(f"[DEBUG] 첨부파일 크기: {size} bytes")
+            logger.debug(f"[DEBUG] 첨부파일 크기: {size} bytes")
             data = att.read_buffer(size)
-            print(f"[DEBUG] 데이터 읽기 성공")
+            logger.debug(f"[DEBUG] 데이터 읽기 성공")
         except Exception as e:
-            print(f"[DEBUG] 데이터 읽기 실패: {e}")
+            logger.debug(f"[DEBUG] 데이터 읽기 실패: {e}")
             continue
         
         # ── (3) 파일 저장 ─────────────────────────────────────
@@ -529,7 +549,7 @@ def extract_attachments(msg: pypff.message,
         with open(save_path, "wb") as fp:
             fp.write(data)
         
-        print(f"[DEBUG] 파일 저장 완료: {save_path}")
+        logger.debug(f"[DEBUG] 파일 저장 완료: {save_path}")
                     #          attach["email_id"],
                     #  attach["save_folder"],
                     #  attach["org_file_name"],
@@ -541,8 +561,9 @@ def extract_attachments(msg: pypff.message,
         results.append({
             "email_id": email_id,
             "org_file_name": name,
-            "phy_file_name": save_path.name,
+            "phy_file_name": physical_file_name,
             "save_folder": save_folder,
+            "file_size": size
         })
     
     return results
