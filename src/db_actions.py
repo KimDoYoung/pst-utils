@@ -7,7 +7,7 @@ from config import settings
 from pathlib import Path
 from datetime import datetime
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 def create_db_path(pst_path: str) -> str:
     """

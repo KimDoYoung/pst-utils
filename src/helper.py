@@ -11,7 +11,8 @@ import time
 
 from logger import get_logger
 from config import settings
-# logger.debug(email.__file__)
+
+
 # MAPI 속성 상수
 PR_MESSAGE_CLASS = 0x001A  # 26 in decimal
 PR_ATTACH_LONG_FILENAME = 0x3707
@@ -29,7 +30,7 @@ PR_ATTACH_CONTENT_ID   = 0x3712  # PT_TSTRING/PT_BINARY
 ATT_RENDERED_IN_BODY   = 0x00000004
 ATT_MHTML_REF          = 0x00002000
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 def convert_to_kst(dt: datetime) -> str:
     """UTC datetime을 KST로 변환"""

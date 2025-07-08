@@ -10,7 +10,7 @@ from logger import get_logger
 from config import settings
 
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 # MAPI 속성 상수들
 PR_MESSAGE_CLASS = 0x001A  # 26
