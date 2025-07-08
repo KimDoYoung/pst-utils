@@ -58,7 +58,8 @@ def create_db_tables(db_path):
             kst_time TEXT,
             content TEXT,
             msg_kind TEXT,
-            folder_path TEXT
+            folder_path TEXT,
+            note TEXT DEFAULT ''  -- 추가 정보 (예: PST 손상 여부 등)
         )
     """)
     cur.execute("""
@@ -98,8 +99,8 @@ def save_email_data_to_db(email_data_list, db_path):
                     INSERT INTO fund_mail
                           (email_id, subject, sender_address, sender_name, from_address, from_name,
                            to_recipients, cc_recipients,
-                           email_time, kst_time, msg_kind, folder_path, content)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           email_time, kst_time, msg_kind, folder_path, content, note)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     email["email_id"],
                     email["subject"],
@@ -113,7 +114,8 @@ def save_email_data_to_db(email_data_list, db_path):
                     email["kst_time"],
                     email["msg_kind"],
                     email["folder_path"],
-                    email["content"]
+                    email["content"],
+                    email["note"]
                 ))
                 parent_id = cur.lastrowid
 

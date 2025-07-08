@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from db_actions import create_db_tables, save_email_data_to_db, create_db_path
-from helper import  recipients_from_headers, byte_decode,extract_attachments,convert_to_kst
+from helper import  recipients_from_headers, byte_decode,extract_attachments,convert_to_kst, safe_get_attachment_count
 from logger import get_logger
 from config import settings
 
@@ -208,9 +208,10 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     """
     pypff.message에서 fund_mail 테이블에 맞는 데이터를 추출합니다.
     """
+    email_id = str(getattr(msg, 'identifier', ''))
     # 기본 정보 추출
     email_data = {
-        'email_id': str(getattr(msg, 'identifier', '')),
+        'email_id': email_id,
         'subject': '',
         'sender_address': '',
         'sender_name': '',
@@ -226,7 +227,7 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
         'folder_path': folder_path,
         'attachments': [],
     }
-    
+    email_data['note'] = None
     # 제목
     try:
         email_data['subject'] = getattr(msg, 'subject', '') or ''
@@ -272,9 +273,14 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     attach_dir = settings.ATTATCH_BASE_DIR / ymd
     # if not os.path.exists(attach_dir):
     #     os.makedirs(attach_dir, exist_ok=True)
-    email_id = email_data['email_id']
-    email_data['attach_files'] = extract_attachments(msg, attach_dir, email_id=email_id)
-    
+    attach_count = safe_get_attachment_count(msg)
+    if attach_count < 0:
+        logger.error(f"{email_data['email_id']} : 첨부파일 갯수를 가져오는 데 실패했습니다.")
+        email_data['note'] = "첨부파일 갯수를 가져오는 데 실패했습니다. (PST 손상 by ChatGPT)"
+    else:
+        logger.info(f"{email_data['email_id']}, 첨부파일 수: {attach_count}")        
+        email_data['attach_files'] = extract_attachments(msg, attach_dir, email_id=email_id, attach_count=attach_count)
+    logger.info(f"메일데이터 추출 : {email_data['email_id']}  {email_data['subject'][:50]}... 폴더: {folder_path}")
     return email_data
 
 def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str = "", depth: int = 0):
