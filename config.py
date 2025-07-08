@@ -19,8 +19,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseSettings, Field, field_validator
-from pydantic_settings import SettingsConfigDict  # (pydantic>=2.5)
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 # 1) .env → 환경변수 (한 번만 실행, 이미 로드돼 있으면 no-op)
 load_dotenv(override=False)
@@ -34,7 +35,7 @@ class Settings(BaseSettings):
     LOG_BACKUP_COUNT: int = Field(default=10)
 
     # ─────────── Base Directories ───────────
-    DB_DIR: Path = Field(default=Path("./db"))
+    DB_BASE_DIR: Path = Field(default=Path("./db"))
     ATTATCH_BASE_DIR: Path = Field(default=Path("./attachments"))  # 원본 표기 유지
 
     # ──────────── 공통 검증 & 폴더 자동 생성 ────────────

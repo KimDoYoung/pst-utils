@@ -19,8 +19,10 @@
             "module": "src.main",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
             "args": [
-                "--pst-path",
                 "/mnt/c/tmp/2021.pst"  // Hardcoded path for testing
             ]
         }

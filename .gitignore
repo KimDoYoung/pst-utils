@@ -11,3 +11,4 @@ wheels/
 extracted_emails.json
 logs/
 db/
+attachments/

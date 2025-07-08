@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 import time
 
 from logger import get_logger
+from config import settings
 # logger.debug(email.__file__)
 # MAPI 속성 상수
 PR_MESSAGE_CLASS = 0x001A  # 26 in decimal
@@ -482,6 +483,21 @@ def make_physical_file_name(prefix: str = "", ext="") -> str:
     micros = f"{now.microsecond:06d}"
     return f"{prefix}_{micros}{ext}"
 
+def extract_path(path: str, base_dir: str) -> str:
+    """
+    주어진 경로에서 base_dir을 제거하고 상대 경로를 반환
+    """
+    path = Path(path)
+    base_dir = Path(base_dir)
+    
+    # base_dir이 path의 상위 디렉토리인지 확인
+    if not path.is_relative_to(base_dir):
+        return str(path)  # base_dir이 포함되지 않은 경우 원본 경로 반환
+    
+    # 상대 경로 추출
+    relative_path = path.relative_to(base_dir)
+    return str(relative_path)
+
 def extract_attachments(msg: pypff.message,
                         base_dir: Path, email_id) -> list[dict]:
     """
@@ -495,9 +511,6 @@ def extract_attachments(msg: pypff.message,
         logger.debug(f"\n[DEBUG] === 첨부파일 {i} 처리 시작 ===")
         
         att = msg.get_attachment(i)
-        # if is_inline_attachment(att):
-        #     logger.debug(f"[DEBUG] 첨부파일 {i}은 본문에 삽입된 가짜 첨부입니다. 건너뜁니다.")
-        #     continue
         
         # ── (1) 원본 파일명 찾기 ───────────────────────────────
         raw_name = find_attach_name(att)
@@ -550,14 +563,10 @@ def extract_attachments(msg: pypff.message,
             fp.write(data)
         
         logger.debug(f"[DEBUG] 파일 저장 완료: {save_path}")
-                    #          attach["email_id"],
-                    #  attach["save_folder"],
-                    #  attach["org_file_name"],
-                    #  attach["phy_file_name"])
-        save_folder = str(save_path.parent)
-        # email_id = str(getattr(msg, 'identifier'))
+        save_folder = extract_path( str(save_path.parent), settings.ATTATCH_BASE_DIR )
         ext = Path(name).suffix  # name에서 확장자 추출 (. 포함)
         physical_file_name = make_physical_file_name(email_id, ext)
+
         results.append({
             "email_id": email_id,
             "org_file_name": name,

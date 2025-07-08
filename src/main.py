@@ -269,11 +269,11 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     # 첨부파일 추출
     ymd = email_data['kst_time'][:10] if email_data['kst_time'] else ''
     # attach_dir = f"/home/kdy987/data/{ymd}"
-    attach_dir = settings.attach_dir / ymd
+    attach_dir = settings.ATTATCH_BASE_DIR / ymd
     # if not os.path.exists(attach_dir):
     #     os.makedirs(attach_dir, exist_ok=True)
     email_id = email_data['email_id']
-    email_data['attachments'] = extract_attachments(msg, attach_dir, email_id=email_id)
+    email_data['attach_files'] = extract_attachments(msg, attach_dir, email_id=email_id)
     
     return email_data
 
@@ -380,7 +380,7 @@ def parse_args() -> argparse.Namespace:
 
     # 위치(필수) 인자 ────────────────────────────────
     parser.add_argument(
-        "pst-path",
+        "pst_path",
         type=Path,
         help="분석할 PST 파일 경로"
     )
@@ -388,10 +388,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.verbose:
-        print(f"[+] PST 경로  : {args.pst_path}")   
 
-    pst_path = "/mnt/c/tmp/2021.pst"
+    # pst_path = "/mnt/c/tmp/2021.pst"
+    pst_path = args.pst_path
 
     if not os.path.exists(pst_path):
         logger.error(f"❌ PST file not found: {pst_path}")
@@ -405,7 +404,7 @@ def main() -> None:
     
     try:
         pf = pypff.file()
-        pf.open(pst_path)
+        pf.open(str(pst_path))
         
         root_folder = pf.get_root_folder()
         if not root_folder:

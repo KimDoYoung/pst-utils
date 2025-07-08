@@ -118,9 +118,6 @@ def save_email_data_to_db(email_data_list, db_path):
                 parent_id = cur.lastrowid
 
                 # --- 2) 첨부파일 bulk INSERT ------------------------
-            # save_folder TEXT,
-            # org_file_name TEXT,
-            # phy_file_name TEXT                
                 attach_rows = [
                     (parent_id,
                      attach["email_id"],
@@ -135,7 +132,7 @@ def save_email_data_to_db(email_data_list, db_path):
                           (parent_id, email_id, save_folder, org_file_name, phy_file_name, file_size)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, attach_rows)
-                attach_count = attach_count + len(attach_rows)
+                attach_count = len(attach_rows)
             # with-블록을 무사히 통과해야만 COMMIT 발생
             logger.info("✅ 이메일 %d건, 첨부파일 %d개 트랜잭션 저장 완료", len(email_data_list), attach_count)
         return db_path
