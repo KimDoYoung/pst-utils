@@ -98,7 +98,7 @@ def save_email_data_to_db(email_data_list, db_path):
                     INSERT INTO fund_mail
                           (email_id, subject, sender_address, sender_name, from_address, from_name,
                            to_recipients, cc_recipients,
-                           email_time, kst_time, content, msg_kind, folder_path)
+                           email_time, kst_time, msg_kind, folder_path, content)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     email["email_id"],
@@ -111,9 +111,9 @@ def save_email_data_to_db(email_data_list, db_path):
                     email["cc_recipients"],
                     email["email_time"],
                     email["kst_time"],
-                    email["content"],
                     email["msg_kind"],
-                    email["folder_path"]
+                    email["folder_path"],
+                    email["content"]
                 ))
                 parent_id = cur.lastrowid
 

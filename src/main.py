@@ -277,61 +277,8 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     
     return email_data
 
-# def debug_message_properties(msg: pypff.message, max_entries: int = 20) -> None:
-#     """메시지의 모든 속성을 디버깅용으로 출력"""
-#     print(f"\n=== Message Properties Debug ===")
-#     print(f"Identifier: {getattr(msg, 'identifier', 'N/A')}")
-#     print(f"Subject: {getattr(msg, 'subject', 'N/A')}")
-    
-#     # 기본 속성들
-#     attrs = [
-#         'sender_name', 'creation_time', 'delivery_time', 'client_submit_time',
-#         'conversation_topic', 'transport_headers', 'number_of_entries'
-#     ]
-    
-#     for attr in attrs:
-#         try:
-#             value = getattr(msg, attr, None)
-#             print(f"{attr}: {value}")
-#         except Exception as e:
-#             print(f"{attr}: ERROR - {e}")
-    
-#     # Recipients 정보
-#     print(f"\n--- Recipients ---")
-#     try:
-#         if hasattr(msg, 'recipients'):
-#             for i, recipient in enumerate(msg.recipients):
-#                 print(f"  Recipient {i}:")
-#                 for r_attr in ['name', 'email_address', 'type']:
-#                     try:
-#                         value = getattr(recipient, r_attr, 'N/A')
-#                         print(f"    {r_attr}: {value}")
-#                     except Exception as e:
-#                         print(f"    {r_attr}: ERROR - {e}")
-#     except Exception as e:
-#         print(f"Recipients: ERROR - {e}")
-    
-#     # Record sets에서 중요한 속성들 찾기
-#     print(f"\n--- Important Properties from Record Sets ---")
-#     important_props = [
-#         (PR_MESSAGE_CLASS, "MESSAGE_CLASS"),
-#         (PR_SENDER_EMAIL_ADDRESS, "SENDER_EMAIL"),
-#         (PR_SENDER_NAME, "SENDER_NAME"),
-#         (PR_SENT_REPRESENTING_EMAIL_ADDRESS, "FROM_EMAIL"),
-#         (PR_SENT_REPRESENTING_NAME, "FROM_NAME"),
-#         (PR_DISPLAY_TO, "TO_RECIPIENTS"),
-#         (PR_DISPLAY_CC, "CC_RECIPIENTS"),
-#         (PR_RECEIVED_BY_EMAIL_ADDRESS, "RECEIVED_BY_EMAIL"),
-#         (PR_RECEIVED_BY_NAME, "RECEIVED_BY_NAME")
-#     ]
-    
-#     for prop_id, prop_name in important_props:
-#         value = get_property_from_record_sets(msg, prop_id)
-#         print(f"{prop_name} ({prop_id}): {value}")
-
 def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str = "", depth: int = 0):
     """폴더를 순회하며 이메일 데이터를 추출"""
-    # emails = []
     
     # 현재 폴더명 추가
     current_folder_name = getattr(folder, 'name', 'Unknown')
