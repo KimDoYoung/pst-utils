@@ -7,7 +7,8 @@ from db_actions import create_db_tables, save_email_data_to_db
 from helper import  recipients_from_headers, byte_decode
 from helper import extract_attachments
 from logger import get_logger
-from dotenv import load_dotenv
+from config import settings
+logger = get_logger(__name__)
 
 # MAPI 속성 상수들
 PR_MESSAGE_CLASS = 0x001A  # 26
@@ -383,38 +384,9 @@ def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str 
     except Exception as e:
         logger.error(f"Error walking folder: {e}")
 
-def create_db_path(pst_path: str) -> str:
-    """
-    PST 파일 경로로부터 DB 파일 경로를 생성합니다.
-    형식: {DB_DIR}/{pst_filename}_{yyyymmdd_hh_mm}.db
-    """
-    import os
-    from pathlib import Path
-    from datetime import datetime
-    from dotenv import load_dotenv
-    
-    # .env 파일 로드
-    load_dotenv()
-    
-    # 환경변수에서 DB_DIR 읽기 (기본값: ./db)
-    db_dir_str = os.getenv("DB_DIR", "./db")
-    
-    # PST 파일명 추출 (확장자 제거)
-    pst_filename = Path(pst_path).stem
-    
-    # 현재 시간으로 타임스탬프 생성
-    timestamp = datetime.now().strftime("%Y%m%d_%H_%M")
-    
-    # DB 파일명 생성
-    db_filename = f"{pst_filename}_{timestamp}.db"
-    
-    # DB 디렉터리 생성
-    db_dir = Path(db_dir_str).expanduser().resolve()
-    db_dir.mkdir(parents=True, exist_ok=True)
-    
-    return str(db_dir / db_filename)
 
-logger = get_logger(__name__)
+
+
 # 메인 실행
 if __name__ == "__main__":
     

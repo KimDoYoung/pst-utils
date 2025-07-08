@@ -3,8 +3,35 @@ import sqlite3
 
 from exceptions import DBCreateError, DBWriteError
 from logger import get_logger
+from config import settings
+from pathlib import Path
+from datetime import datetime
 
 logger = get_logger(__name__)
+
+def create_db_path(pst_path: str) -> str:
+    """
+    PST 파일 경로로부터 DB 파일 경로를 생성합니다.
+    형식: {DB_DIR}/{pst_filename}_{yyyymmdd_hh_mm}.db
+    """
+    
+    # 환경변수에서 DB_DIR 읽기 (기본값: ./db)
+    db_dir_str = settings.DB_BASE_DIR or "./db"
+    
+    # PST 파일명 추출 (확장자 제거)
+    pst_filename = Path(pst_path).stem
+    
+    # 현재 시간으로 타임스탬프 생성
+    timestamp = datetime.now().strftime("%Y%m%d_%H_%M")
+    
+    # DB 파일명 생성
+    db_filename = f"{pst_filename}_{timestamp}.db"
+    
+    # DB 디렉터리 생성
+    db_dir = Path(db_dir_str).expanduser().resolve()
+    db_dir.mkdir(parents=True, exist_ok=True)
+    
+    return str(db_dir / db_filename)
 
 def create_db_tables(db_path):
     """
@@ -41,7 +68,9 @@ def create_db_tables(db_path):
             email_id TEXT,  -- fund_mail 테이블의 id
             save_folder TEXT,
             org_file_name TEXT,
-            phy_file_name TEXT
+            phy_file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            FOREIGN KEY (parent_id) REFERENCES fund_mail(id) ON DELETE CASCADE
         )
     """)        
     conn.commit()
@@ -97,13 +126,14 @@ def save_email_data_to_db(email_data_list, db_path):
                      attach["email_id"],
                      attach["save_folder"],
                      attach["org_file_name"],
-                     attach["phy_file_name"])
+                     attach["phy_file_name"], 
+                     attach['file_size'])
                     for attach in email.get("attach_files", [])
                 ]
                 cur.executemany("""
                     INSERT INTO fund_mail_attach
-                          (parent_id, email_id, save_folder, org_file_name, phy_file_name)
-                    VALUES (?, ?, ?, ?, ?)
+                          (parent_id, email_id, save_folder, org_file_name, phy_file_name, file_size)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, attach_rows)
                 attach_count = attach_count + len(attach_rows)
             # with-블록을 무사히 통과해야만 COMMIT 발생
