@@ -201,7 +201,7 @@ def resolve_sender_address(msg: pypff.message, original_dn: str) -> str:
     except Exception:
         pass
 
-    # 3. Exchange DN에서 유용한 정보 추출
+    # 3. Exchange DN에서 유용한 정보 추출 
     try:
         # CN= 부분에서 사용자 정보 추출
         cn_match = re.search(r'CN=([^/]+)(?:/|$)', original_dn, re.IGNORECASE)
