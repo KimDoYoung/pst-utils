@@ -2,9 +2,9 @@
 
 
 a = Analysis(
-    ['/home/kdy987/pst-utils/src/main.py'],
-    pathex=['/home/kdy987/pst-utils/src'],
-    binaries=[('/home/kdy987/pst-utils/.venv/lib/python3.12/site-packages/pypff.cpython-312-x86_64-linux-gnu.so', '.')],
+    ['/home/kdy987/work/pst-utils/src/main.py'],
+    pathex=['/home/kdy987/work/pst-utils/src'],
+    binaries=[('/home/kdy987/work/pst-utils/.venv/lib/python3.12/site-packages/pypff.cpython-312-x86_64-linux-gnu.so', '.')],
     datas=[],
     hiddenimports=['config'],
     hookspath=[],

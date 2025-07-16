@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from db_actions import create_db_tables, save_email_data_to_db, create_db_path
-from helper import  recipients_from_headers, byte_decode,extract_attachments,convert_to_kst, safe_get_attachment_count
+from helper import  get_message_class, get_sender_from_address,  byte_decode,extract_attachments,convert_to_kst, safe_get_attachment_count, get_property_from_record_sets, get_recipients_info, determine_message_kind
 from logger import get_logger
 from config import settings
 
@@ -13,143 +13,53 @@ from config import settings
 logger = get_logger()
 
 # MAPI 속성 상수들
-PR_MESSAGE_CLASS = 0x001A  # 26
-PR_SENDER_EMAIL_ADDRESS = 0x0C1F  # 3103
-PR_SENDER_NAME = 0x0C1A  # 3098
-PR_SENT_REPRESENTING_EMAIL_ADDRESS = 0x0065  # 101
-PR_SENT_REPRESENTING_NAME = 0x0042  # 66
-PR_DISPLAY_TO = 0x0E04  # 3588
-PR_DISPLAY_CC = 0x0E03  # 3587
-PR_RECEIVED_BY_EMAIL_ADDRESS = 0x0076  # 118
-PR_RECEIVED_BY_NAME = 0x0040  # 64
-PR_MESSAGE_FLAGS   = 0x0E07  # 3591
-MSGFLAG_FROMME     = 0x00000040
+# PR_MESSAGE_CLASS = 0x001A  # 26
+# # PR_SENDER_EMAIL_ADDRESS = 0x0C1F  # 3103
+# # PR_FROM_EMAIL_ADDRESS = 0x0051
+# PR_SENDER_NAME = 0x0C1A  # 3098
+# PR_SENT_REPRESENTING_EMAIL_ADDRESS = 0x0065  # 101
+# PR_SENT_REPRESENTING_NAME = 0x0042  # 66
+# PR_DISPLAY_TO = 0x0E04  # 3588
+# PR_DISPLAY_CC = 0x0E03  # 3587
+# # PR_RECEIVED_BY_EMAIL_ADDRESS = 0x0076  # 118
+# # PR_RECEIVED_BY_NAME = 0x0040  # 64
+# PR_MESSAGE_FLAGS   = 0x0E07  # 3591
+# MSGFLAG_FROMME     = 0x00000040
 
-def get_message_class(msg: pypff.message) -> str:
-    """message_class 추출"""
-    try:
-        if hasattr(msg, 'message_class') and msg.message_class:
-            return msg.message_class
-    except Exception:
-        pass
+# def get_message_class(msg: pypff.message) -> str:
+#     """message_class 추출"""
+#     try:
+#         if hasattr(msg, 'message_class') and msg.message_class:
+#             return msg.message_class
+#     except Exception:
+#         pass
     
-    try:
-        if hasattr(msg, 'get_message_class'):
-            mc = msg.get_message_class()
-            if mc:
-                return mc
-    except Exception:
-        pass
+#     try:
+#         if hasattr(msg, 'get_message_class'):
+#             mc = msg.get_message_class()
+#             if mc:
+#                 return mc
+#     except Exception:
+#         pass
     
-    try:
-        if hasattr(msg, 'record_sets') and msg.record_sets:
-            for record_set in msg.record_sets:
-                if hasattr(record_set, 'entries'):
-                    for entry in record_set.entries:
-                        if (hasattr(entry, 'entry_type') and 
-                            entry.entry_type == PR_MESSAGE_CLASS):
-                            if hasattr(entry, 'data_as_string'):
-                                try:
-                                    return entry.data_as_string
-                                except Exception:
-                                    pass
-    except Exception:
-        pass
+#     try:
+#         if hasattr(msg, 'record_sets') and msg.record_sets:
+#             for record_set in msg.record_sets:
+#                 if hasattr(record_set, 'entries'):
+#                     for entry in record_set.entries:
+#                         if (hasattr(entry, 'entry_type') and 
+#                             entry.entry_type == PR_MESSAGE_CLASS):
+#                             if hasattr(entry, 'data_as_string'):
+#                                 try:
+#                                     return entry.data_as_string
+#                                 except Exception:
+#                                     pass
+#     except Exception:
+#         pass
     
-    return ""
+#     return ""
 
-def get_property_from_record_sets(msg: pypff.message, property_id: int) -> str:
-    """record_sets에서 특정 MAPI 속성 값을 추출"""
-    try:
-        if hasattr(msg, 'record_sets') and msg.record_sets:
-            for record_set in msg.record_sets:
-                if hasattr(record_set, 'entries'):
-                    for entry in record_set.entries:
-                        if (hasattr(entry, 'entry_type') and 
-                            entry.entry_type == property_id):
-                            if hasattr(entry, 'data_as_string'):
-                                try:
-                                    return entry.data_as_string
-                                except Exception:
-                                    pass
-                            # 백업: 직접 디코딩
-                            if hasattr(entry, 'data') and entry.data:
-                                try:
-                                    if hasattr(entry, 'value_type'):
-                                        if entry.value_type == 31:  # PT_UNICODE
-                                            return entry.data.decode('utf-16-le', 'replace').rstrip('\x00')
-                                        elif entry.value_type == 30:  # PT_STRING8
-                                            return entry.data.decode('cp1252', 'replace').rstrip('\x00')
-                                except Exception:
-                                    pass
-    except Exception:
-        pass
-    return ""
 
-def determine_message_kind(msg: pypff.message, folder_path: str) -> str:
-    # 1) 폴더명으로 빠르게 판별
-    if folder_path.lower() in ("sent items", "sent", "보낸 편지함", "outbox"):
-        return "sent"
-
-    # 2) MAPI 플래그 확인 (보다 확실)
-    flags = get_property_from_record_sets(msg, PR_MESSAGE_FLAGS)
-    try:
-        flags_int = int(flags) if flags else 0
-        if flags_int & MSGFLAG_FROMME:
-            return "sent"
-    except ValueError:
-        pass
-    return "receive"
-
-def get_receiver_info(msg: pypff.message) -> tuple:
-    """수신자 정보 추출 (이메일 주소, 이름)"""
-    receiver_addresses = []
-    receiver_names = []
-    
-    try:
-        if hasattr(msg, 'recipients'):
-            for recipient in msg.recipients:
-                try:
-                    # 수신자 타입 확인 (1=TO, 2=CC, 3=BCC)
-                    recipient_type = getattr(recipient, 'type', 1)
-                    
-                    # TO 수신자만 처리
-                    if recipient_type == 1:
-                        email = getattr(recipient, 'email_address', '') or ''
-                        name = getattr(recipient, 'name', '') or ''
-                        
-                        if email:
-                            receiver_addresses.append(email)
-                        if name:
-                            receiver_names.append(name)
-                            
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    
-    # record_sets에서도 시도
-    if not receiver_addresses:
-        received_by_email = get_property_from_record_sets(msg, PR_RECEIVED_BY_EMAIL_ADDRESS)
-        received_by_name = get_property_from_record_sets(msg, PR_RECEIVED_BY_NAME)
-        
-        if received_by_email:
-            receiver_addresses.append(received_by_email)
-        if received_by_name:
-            receiver_names.append(received_by_name)
-    
-    return "; ".join(receiver_addresses), "; ".join(receiver_names)
-
-def get_recipients_info(msg: pypff.message) -> tuple:
-    """수신자와 참조자 정보를 추출"""
-    to_recipients = []
-    cc_recipients = []
-    
-    # transport_headers에서 추출
-    tr_header = getattr(msg, 'transport_headers', b'')
-    to1, cc1 = recipients_from_headers(tr_header)
-    
-    return to1, cc1
 
 
 
@@ -241,12 +151,11 @@ def extract_email_data(msg: pypff.message, folder_path: str) -> dict:
     except Exception:
         pass
     
-    # 발신자 이메일 주소
-    sender_email = get_property_from_record_sets(msg, PR_SENDER_EMAIL_ADDRESS)
-    if sender_email:
-        email_data['sender_address'] = sender_email
-        email_data['from_address'] = sender_email
     
+    sender_address, from_address = get_sender_from_address(msg)
+    email_data['sender_address'] = sender_address
+    email_data['from_address'] = from_address
+
     # 수신자 정보
     to_recipients, cc_recipients = get_recipients_info(msg)
     email_data['to_recipients'] = to_recipients
@@ -312,7 +221,7 @@ def walk_and_extract_emails(db_path:str, folder: pypff.folder, folder_path: str 
         # 하위 폴더 처리
         if hasattr(folder, 'sub_folders'):
             for sub_folder in folder.sub_folders:
-               
+            
                 try:
                     sub_folder_name = getattr(sub_folder, 'name', 'Unknown')
                     logger.info(f"{'  ' * depth}📁 {sub_folder_name}")

@@ -23,7 +23,7 @@
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
             "args": [
-                "/mnt/c/tmp/2021.pst"  // Hardcoded path for testing
+                "/home/kdy987/tmp/2023.pst"  // Hardcoded path for testing
             ]
         }
     ]

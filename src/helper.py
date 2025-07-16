@@ -30,7 +30,255 @@ PR_ATTACH_CONTENT_ID   = 0x3712  # PT_TSTRING/PT_BINARY
 ATT_RENDERED_IN_BODY   = 0x00000004
 ATT_MHTML_REF          = 0x00002000
 
+PR_RECEIVED_BY_EMAIL_ADDRESS = 0x0076  # 118
+PR_RECEIVED_BY_NAME = 0x0040  # 64
+
+PR_SENDER_EMAIL_ADDRESS = 0x0C1F  # 3103
+PR_FROM_EMAIL_ADDRESS = 0x0051
+
+PR_MESSAGE_FLAGS   = 0x0E07  # 3591
+MSGFLAG_FROMME     = 0x00000040
+
 logger = get_logger()
+
+
+def get_property_from_record_sets(msg: pypff.message, property_id: int) -> str:
+    """record_sets에서 특정 MAPI 속성 값을 추출"""
+    try:
+        if hasattr(msg, 'record_sets') and msg.record_sets:
+            for record_set in msg.record_sets:
+                if hasattr(record_set, 'entries'):
+                    for entry in record_set.entries:
+                        if (hasattr(entry, 'entry_type') and 
+                            entry.entry_type == property_id):
+                            if hasattr(entry, 'data_as_string'):
+                                try:
+                                    return entry.data_as_string
+                                except Exception:
+                                    pass
+                            # 백업: 직접 디코딩
+                            if hasattr(entry, 'data') and entry.data:
+                                try:
+                                    if hasattr(entry, 'value_type'):
+                                        if entry.value_type == 31:  # PT_UNICODE
+                                            return entry.data.decode('utf-16-le', 'replace').rstrip('\x00')
+                                        elif entry.value_type == 30:  # PT_STRING8
+                                            return entry.data.decode('cp1252', 'replace').rstrip('\x00')
+                                except Exception:
+                                    pass
+    except Exception:
+        pass
+    return ""
+
+
+def determine_message_kind(msg: pypff.message, folder_path: str) -> str:
+    # 1) 폴더명으로 빠르게 판별
+    if folder_path.lower() in ("sent items", "sent", "보낸 편지함", "outbox"):
+        return "sent"
+
+    # 2) MAPI 플래그 확인 (보다 확실)
+    flags = get_property_from_record_sets(msg, PR_MESSAGE_FLAGS)
+    try:
+        flags_int = int(flags) if flags else 0
+        if flags_int & MSGFLAG_FROMME:
+            return "sent"
+    except ValueError:
+        pass
+    return "receive"
+
+def get_receiver_info(msg: pypff.message) -> tuple:
+    """수신자 정보 추출 (이메일 주소, 이름)"""
+    receiver_addresses = []
+    receiver_names = []
+    
+    try:
+        if hasattr(msg, 'recipients'):
+            for recipient in msg.recipients:
+                try:
+                    # 수신자 타입 확인 (1=TO, 2=CC, 3=BCC)
+                    recipient_type = getattr(recipient, 'type', 1)
+                    
+                    # TO 수신자만 처리
+                    if recipient_type == 1:
+                        email = getattr(recipient, 'email_address', '') or ''
+                        name = getattr(recipient, 'name', '') or ''
+                        
+                        if email:
+                            receiver_addresses.append(email)
+                        if name:
+                            receiver_names.append(name)
+                            
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    # record_sets에서도 시도
+    if not receiver_addresses:
+        received_by_email = get_property_from_record_sets(msg, PR_RECEIVED_BY_EMAIL_ADDRESS)
+        received_by_name = get_property_from_record_sets(msg, PR_RECEIVED_BY_NAME)
+        
+        if received_by_email:
+            receiver_addresses.append(received_by_email)
+        if received_by_name:
+            receiver_names.append(received_by_name)
+    
+    return "; ".join(receiver_addresses), "; ".join(receiver_names)
+
+def get_recipients_info(msg: pypff.message) -> tuple:
+    """수신자와 참조자 정보를 추출"""
+    to_recipients = []
+    cc_recipients = []
+    
+    # transport_headers에서 추출
+    tr_header = getattr(msg, 'transport_headers', b'')
+    to1, cc1 = recipients_from_headers(tr_header)
+    
+    return to1, cc1
+
+def get_sender_from_address(msg: pypff.message): 
+    # sender_address와 from_address를 추출
+
+    sender_email = get_property_from_record_sets(msg, PR_SENDER_EMAIL_ADDRESS)
+    from_email = get_property_from_record_sets(msg, PR_FROM_EMAIL_ADDRESS)
+
+    sender_address = ''
+    from_address = ''
+    if sender_email:
+        if '@' in sender_email:
+            sender_address = sender_email
+        else:
+            # Legacy Exchange 주소인 경우, 실제 SMTP 주소를 추정
+            sender_address = resolve_sender_address(msg, sender_email)
+
+    if from_email:
+        if '@' in from_email:
+            from_address = from_email
+        else:
+            # Legacy Exchange 주소인 경우, 실제 SMTP 주소를 추정
+            from_address = resolve_sender_address(msg, from_email)
+    else:
+        from_address = sender_email  # fallback
+
+    return sender_address, from_address
+
+def resolve_sender_address(msg: pypff.message, original_dn: str) -> str:
+    """
+    Legacy Exchange 주소(`/O=...`)인 경우, 실제 SMTP 주소를 추정 시도
+    """
+    possible_props = [
+        0x0C1F,  # PR_SENDER_EMAIL_ADDRESS
+        0x0C1E,  # PR_SENDER_EMAIL_ADDRESS_TYPE
+        0x5D01,  # PR_SENDER_SMTP_ADDRESS
+        0x0076,  # PR_RECEIVED_BY_EMAIL_ADDRESS
+        0x0065,  # PR_SENT_REPRESENTING_EMAIL_ADDRESS
+        0x3003,  # PR_EMAIL_ADDRESS
+        0x39FE,  # PR_SMTP_ADDRESS
+    ]
+    
+    for prop_id in possible_props:
+        email = get_property_from_record_sets(msg, prop_id)
+        if email and '@' in email:
+            return email
+
+    # 2. 메시지 헤더에서 From 주소 추출 시도
+    try:
+        if hasattr(msg, 'transport_headers') and msg.transport_headers:
+            headers = msg.transport_headers
+            # From 헤더에서 이메일 추출
+            from_match = re.search(r'From:.*?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', headers, re.IGNORECASE)
+            if from_match:
+                address1 = from_match.group(1)
+                logger.debug(f"From 헤더에서 추출된 주소: {address1}")
+                return address1
+                
+            # Reply-To 헤더에서 이메일 추출
+            reply_to_match = re.search(r'Reply-To:.*?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', headers, re.IGNORECASE)
+            if reply_to_match:
+                address1 = reply_to_match.group(1)
+                logger.debug(f"Reply-To 헤더에서 추출된 주소: {address1}")
+                return address1
+    except Exception:
+        pass
+
+    # 3. Exchange DN에서 유용한 정보 추출
+    try:
+        # CN= 부분에서 사용자 정보 추출
+        cn_match = re.search(r'CN=([^/]+)(?:/|$)', original_dn, re.IGNORECASE)
+        if cn_match:
+            cn_value = cn_match.group(1)
+            
+            # GUID 형식이 아닌 경우 (실제 사용자명인 경우)
+            if not re.match(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}', cn_value, re.IGNORECASE):
+                # 도메인 정보 추출 시도
+                domain = extract_domain_from_dn(original_dn)
+                if domain:
+                    return f"{cn_value}@{domain}"
+                else:
+                    return cn_value  # 적어도 사용자명은 반환
+    except Exception:
+        pass
+
+    # 4. 추가 MAPI 속성들 검색
+    additional_properties = [
+        0x3001,  # PR_DISPLAY_NAME
+        0x3002,  # PR_ADDRTYPE
+        0x0E08,  # PR_MESSAGE_DELIVERY_TIME
+        0x007D,  # PR_TRANSPORT_MESSAGE_HEADERS
+    ]
+    
+    for prop_id in additional_properties:
+        prop_value = get_property_from_record_sets(msg, prop_id)
+        if prop_value and '@' in prop_value:
+            # 문자열에서 이메일 주소 패턴 찾기
+            email_match = re.search(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', prop_value)
+            if email_match:
+                return email_match.group(1)
+    
+    # 5. 모든 방법이 실패한 경우, 원본 DN을 정리해서 반환
+    return clean_exchange_dn(original_dn)
+
+
+def extract_domain_from_dn(dn: str) -> str:
+    """Exchange DN에서 도메인 정보 추출"""
+    try:
+        # OU= 부분에서 도메인 정보 추출 시도
+        ou_match = re.search(r'OU=([^/]+)', dn, re.IGNORECASE)
+        if ou_match:
+            ou_value = ou_match.group(1).lower()
+            # 일반적인 도메인 패턴 매칭
+            if 'exchange' in ou_value:
+                # ExchangeLabs의 경우 outlook.com이나 기본 도메인 추정
+                return "outlook.com"
+    except Exception:
+        pass
+    return ""
+
+def clean_exchange_dn(dn: str) -> str:
+    """Exchange DN을 읽기 쉬운 형태로 정리"""
+    try:
+        # CN= 부분만 추출
+        cn_match = re.search(r'CN=([^/]+)(?:/|$)', dn, re.IGNORECASE)
+        if cn_match:
+            cn_value = cn_match.group(1)
+            # GUID 형식이 아닌 경우 그대로 반환
+            if not re.match(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}', cn_value, re.IGNORECASE):
+                return cn_value
+            # GUID 형식인 경우 앞 부분만 추출
+            else:
+                prefix_match = re.search(r'^([^-]+)', cn_value)
+                if prefix_match:
+                    return f"User_{prefix_match.group(1)[:8]}"
+        
+        # OU= 부분에서 조직 정보 추출
+        ou_match = re.search(r'OU=([^/]+)', dn, re.IGNORECASE)
+        if ou_match:
+            return f"Exchange_{ou_match.group(1)}"
+            
+    except Exception:
+        pass
+    
+    return dn  # 모든 처리가 실패하면 원본 반환
 
 def convert_to_kst(dt: datetime) -> str:
     """UTC datetime을 KST로 변환"""
